@@ -1,15 +1,16 @@
--- Vehicle Orion Live Tuner
+-- Vehicle Kavo Live Tuner
 -- Use only in your own Roblox experience/test environment.
 -- Does not mutate read-only vehicle definition modules.
 
-local Players = game:GetService("Players")
+local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local UIS = game:GetService("UserInputService")
+local UIS        = game:GetService("UserInputService")
+local Workspace  = game:GetService("Workspace")
 
-local player = Players.LocalPlayer
-local OrionLib
-local enabled = false
+local player  = Players.LocalPlayer
+local Library -- Kavo handle
+
+local enabled   = false
 local autoApply = true
 local currentSeat
 local currentVehicle
@@ -29,10 +30,12 @@ local cfg = {
 
 local defaults = {}
 
+-- ─── Vehicle helpers ──────────────────────────────────────────────────────────
+
 local function getSeat()
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local seat = humanoid and humanoid.SeatPart
+	local char     = player.Character or player.CharacterAdded:Wait()
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	local seat     = humanoid and humanoid.SeatPart
 	return seat and seat:IsA("VehicleSeat") and seat or nil
 end
 
@@ -86,7 +89,7 @@ local function applyLiveTune()
 	if not currentVehicle and not refreshVehicle() then return end
 	for _, item in ipairs(currentVehicle:GetDescendants()) do
 		if item:IsA("HingeConstraint") and item.Parent and tostring(item.Parent.Name):find("Steer") then
-			setProp(item, "ServoMaxTorque",       1000 * cfg.SteerPower * cfg.Grip)
+			setProp(item, "ServoMaxTorque",       1000   * cfg.SteerPower * cfg.Grip)
 			setProp(item, "MotorMaxAcceleration", 500000 * cfg.SteerPower)
 			setProp(item, "AngularSpeed",         math.clamp(4 * cfg.SteerPower, 1, 30))
 		elseif item:IsA("SpringConstraint") then
@@ -118,25 +121,25 @@ local function startController()
 	applyLiveTune()
 	heartbeat = RunService.Heartbeat:Connect(function(dt)
 		if not enabled
-			or not currentSeat
-			or not currentSeat:IsDescendantOf(Workspace)
-			or not chassis
-			or not chassis:IsDescendantOf(Workspace)
+			or not currentSeat or not currentSeat:IsDescendantOf(Workspace)
+			or not chassis     or not chassis:IsDescendantOf(Workspace)
 		then
 			enabled = false
-			if heartbeat then heartbeat:Disconnect() heartbeat = nil end
+			if heartbeat then heartbeat:Disconnect(); heartbeat = nil end
 			return
 		end
 		if autoApply then applyLiveTune() end
+
 		local cf           = chassis.CFrame
 		local forward      = flatUnit(cf.LookVector)
 		local right        = flatUnit(cf.RightVector)
 		local velocity     = chassis.AssemblyLinearVelocity
-		local flatVelocity = Vector3.new(velocity.X, 0, velocity.Z)
-		local forwardSpeed = flatVelocity:Dot(forward)
-		local sideSpeed    = flatVelocity:Dot(right)
+		local flatVel      = Vector3.new(velocity.X, 0, velocity.Z)
+		local forwardSpeed = flatVel:Dot(forward)
+		local sideSpeed    = flatVel:Dot(right)
 		local throttle     = currentSeat.ThrottleFloat
-		local wantedSpeed  = forwardSpeed * 0.992
+
+		local wantedSpeed = forwardSpeed * 0.992
 		if throttle > 0.05 then
 			wantedSpeed = cfg.SpeedCap
 		elseif throttle < -0.05 then
@@ -145,10 +148,12 @@ local function startController()
 				wantedSpeed = -math.min(cfg.SpeedCap * 0.28, 90)
 			end
 		end
+
 		local alpha      = math.clamp(dt * cfg.Accel, 0, 1)
 		local newForward = forwardSpeed + (wantedSpeed - forwardSpeed) * alpha
 		local newSide    = sideSpeed / cfg.Grip
 		local newY       = math.clamp(velocity.Y, -55, 22)
+
 		chassis.AssemblyLinearVelocity  = (forward * newForward) + (right * newSide) + Vector3.new(0, newY, 0)
 		chassis.AssemblyAngularVelocity = chassis.AssemblyAngularVelocity * cfg.SpinDamp
 	end)
@@ -156,7 +161,7 @@ end
 
 local function stopController()
 	enabled = false
-	if heartbeat then heartbeat:Disconnect() heartbeat = nil end
+	if heartbeat then heartbeat:Disconnect(); heartbeat = nil end
 end
 
 local function hardStop()
@@ -169,152 +174,95 @@ end
 local function eject()
 	stopController()
 	resetLiveTune()
-	if OrionLib then OrionLib:Destroy() end
+	if Library then Library:Destroy() end
 	script:Destroy()
 end
 
--- ─── UI ───────────────────────────────────────────────────────────────────────
+-- ─── UI (Kavo — zero filesystem usage) ───────────────────────────────────────
 
-OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
+Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 
-local Window = OrionLib:MakeWindow({
-	Name         = "Vehicle Live Tuner",
-	HidePremium  = true,
-	SaveConfig   = false,       -- no filesystem calls at all
-	IntroEnabled = false,
-})
+local Window = Library.CreateLib("Vehicle Live Tuner", "DarkTheme")
 
 -- Drive tab
-local DriveTab = Window:MakeTab({ Name = "Drive", Icon = "rbxassetid://0", PremiumOnly = false })
+local DriveTab     = Window:NewTab("Drive")
+local CtrlSection  = DriveTab:NewSection("Controller")
 
-DriveTab:AddSection({ Name = "Controller" })
+CtrlSection:NewToggle("Enabled", "Start/stop the tuner controller", function(state)
+	if state then startController() else stopController() end
+end)
 
-DriveTab:AddToggle({
-	Name     = "Enabled",
-	Default  = false,
-	Callback = function(value)
-		if value then startController() else stopController() end
-	end,
-})
+CtrlSection:NewToggle("Auto Reapply Tune", "Reapply tune every frame", function(state)
+	autoApply = state
+end)
 
-DriveTab:AddToggle({
-	Name     = "Auto Reapply Live Tune",
-	Default  = true,
-	Callback = function(value) autoApply = value end,
-})
+local SpeedSection = DriveTab:NewSection("Speed")
 
-DriveTab:AddSection({ Name = "Speed" })
+SpeedSection:NewSlider("Speed Cap", "Max speed in studs/s", 1000, 20, function(value)
+	cfg.SpeedCap = value
+end)
 
-DriveTab:AddSlider({
-	Name    = "Speed Cap",
-	Min     = 20,
-	Max     = 1000,
-	Default = cfg.SpeedCap,
-	Color   = Color3.fromRGB(255, 255, 255),
-	Increment = 5,
-	Callback = function(value) cfg.SpeedCap = value end,
-})
+SpeedSection:NewSlider("Acceleration", "How quickly speed builds up (1-30)", 30, 1, function(value)
+	cfg.Accel = value
+end)
 
-DriveTab:AddSlider({
-	Name      = "Acceleration Response",
-	Min       = 1,
-	Max       = 30,
-	Default   = cfg.Accel,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.Accel = value end,
-})
-
-DriveTab:AddSlider({
-	Name      = "Brake Strength",
-	Min       = 1,
-	Max       = 60,
-	Default   = cfg.Brake,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.Brake = value end,
-})
+SpeedSection:NewSlider("Brake Strength", "Braking force multiplier (1-60)", 60, 1, function(value)
+	cfg.Brake = value
+end)
 
 -- Handling tab
-local HandlingTab = Window:MakeTab({ Name = "Handling", Icon = "rbxassetid://0", PremiumOnly = false })
+local HandlingTab  = Window:NewTab("Handling")
+local GripSection  = HandlingTab:NewSection("Grip & Stability")
 
-HandlingTab:AddSection({ Name = "Grip And Stability" })
+GripSection:NewSlider("Steer Power x10", "Steering torque (5-50 = 0.5x-5.0x)", 50, 5, function(value)
+	cfg.SteerPower = value / 10
+	applyLiveTune()
+end)
 
-HandlingTab:AddSlider({
-	Name      = "Steer Power",
-	Min       = 5,
-	Max       = 50,
-	Default   = cfg.SteerPower * 10,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.SteerPower = value / 10 applyLiveTune() end,
-})
+GripSection:NewSlider("Grip x10", "Lateral grip (10-50 = 1.0x-5.0x)", 50, 10, function(value)
+	cfg.Grip = value / 10
+	applyLiveTune()
+end)
 
-HandlingTab:AddSlider({
-	Name      = "Grip",
-	Min       = 10,
-	Max       = 50,
-	Default   = cfg.Grip * 10,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.Grip = value / 10 applyLiveTune() end,
-})
+GripSection:NewSlider("Downforce x10", "Downforce multiplier (10-80 = 1.0x-8.0x)", 80, 10, function(value)
+	cfg.Downforce = value / 10
+	applyLiveTune()
+end)
 
-HandlingTab:AddSlider({
-	Name      = "Downforce",
-	Min       = 10,
-	Max       = 80,
-	Default   = cfg.Downforce * 10,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.Downforce = value / 10 applyLiveTune() end,
-})
+GripSection:NewSlider("Spring Damp x10", "Suspension damping (5-40 = 0.5x-4.0x)", 40, 5, function(value)
+	cfg.SpringDamp = value / 10
+	applyLiveTune()
+end)
 
-HandlingTab:AddSlider({
-	Name      = "Spring Damping",
-	Min       = 5,
-	Max       = 40,
-	Default   = cfg.SpringDamp * 10,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.SpringDamp = value / 10 applyLiveTune() end,
-})
-
-HandlingTab:AddSlider({
-	Name      = "Spin Damping",
-	Min       = 65,
-	Max       = 99,
-	Default   = cfg.SpinDamp * 100,
-	Color     = Color3.fromRGB(255, 255, 255),
-	Increment = 1,
-	Callback  = function(value) cfg.SpinDamp = value / 100 end,
-})
+GripSection:NewSlider("Spin Damp x100", "Angular velocity decay (65-99 = 0.65x-0.99x)", 99, 65, function(value)
+	cfg.SpinDamp = value / 100
+end)
 
 -- Actions tab
-local ActionsTab = Window:MakeTab({ Name = "Actions", Icon = "rbxassetid://0", PremiumOnly = false })
+local ActionsTab    = Window:NewTab("Actions")
+local ActSection    = ActionsTab:NewSection("Vehicle Controls")
 
-ActionsTab:AddSection({ Name = "Vehicle" })
+ActSection:NewButton("Refresh Vehicle", "Re-detect seat and chassis", function()
+	refreshVehicle()
+end)
 
-ActionsTab:AddButton({ Name = "Refresh Current Vehicle", Callback = refreshVehicle })
-ActionsTab:AddButton({ Name = "Apply Live Tune",         Callback = applyLiveTune })
-ActionsTab:AddButton({ Name = "Reset Live Tune",         Callback = resetLiveTune })
-ActionsTab:AddButton({ Name = "Hard Stop Vehicle",       Callback = hardStop })
+ActSection:NewButton("Apply Live Tune", "Push current cfg values now", function()
+	applyLiveTune()
+end)
 
-ActionsTab:AddSection({ Name = "Keybinds  (toggle = B,  eject = F12)" })
+ActSection:NewButton("Reset Live Tune", "Restore original vehicle values", function()
+	resetLiveTune()
+end)
 
-ActionsTab:AddButton({
-	Name = "Toggle Controller  [B]",
-	Callback = function()
-		if enabled then stopController() else startController() end
-	end,
-})
+ActSection:NewButton("Hard Stop", "Zero out all vehicle velocity", function()
+	hardStop()
+end)
 
-ActionsTab:AddButton({
-	Name     = "Eject  [F12]",
-	Callback = eject,
-})
+ActSection:NewButton("Eject (F12)", "Destroy UI and clean up", function()
+	eject()
+end)
 
--- Keyboard shortcuts (B and F12) – no keybind element needed, no filesystem risk
+-- Keyboard shortcuts
 UIS.InputBegan:Connect(function(input, gpe)
 	if gpe then return end
 	if input.KeyCode == Enum.KeyCode.B then
@@ -324,5 +272,4 @@ UIS.InputBegan:Connect(function(input, gpe)
 	end
 end)
 
-OrionLib:Init()
-print("[VehicleTuner] OrionLib loaded. B toggles controller, F12 ejects.")
+print("[VehicleTuner] Kavo loaded. B = toggle controller, F12 = eject.")

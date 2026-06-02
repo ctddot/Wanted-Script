@@ -52,7 +52,6 @@ local function getChassis(vehicle)
 	if part and part:IsA("BasePart") then
 		return part
 	end
-
 	local best
 	for _, item in ipairs(vehicle:GetDescendants()) do
 		if item:IsA("BasePart") and (not best or item.AssemblyMass > best.AssemblyMass) then
@@ -92,7 +91,6 @@ local function applyLiveTune()
 	if not currentVehicle and not refreshVehicle() then
 		return
 	end
-
 	for _, item in ipairs(currentVehicle:GetDescendants()) do
 		if item:IsA("HingeConstraint") and item.Parent and tostring(item.Parent.Name):find("Steer") then
 			setProp(item, "ServoMaxTorque", 1000 * cfg.SteerPower * cfg.Grip)
@@ -120,32 +118,20 @@ local function resetLiveTune()
 end
 
 local function startController()
-	if enabled then
-		return
-	end
-
+	if enabled then return end
 	if not refreshVehicle() then
 		warn("[VehicleTuner] Sit in a VehicleSeat first.")
 		return
 	end
-
 	enabled = true
 	applyLiveTune()
-
 	heartbeat = RunService.Heartbeat:Connect(function(dt)
 		if not enabled or not currentSeat or not currentSeat:IsDescendantOf(Workspace) or not chassis or not chassis:IsDescendantOf(Workspace) then
 			enabled = false
-			if heartbeat then
-				heartbeat:Disconnect()
-				heartbeat = nil
-			end
+			if heartbeat then heartbeat:Disconnect() heartbeat = nil end
 			return
 		end
-
-		if autoApply then
-			applyLiveTune()
-		end
-
+		if autoApply then applyLiveTune() end
 		local cf = chassis.CFrame
 		local forward = flatUnit(cf.LookVector)
 		local right = flatUnit(cf.RightVector)
@@ -154,7 +140,6 @@ local function startController()
 		local forwardSpeed = flatVelocity:Dot(forward)
 		local sideSpeed = flatVelocity:Dot(right)
 		local throttle = currentSeat.ThrottleFloat
-
 		local wantedSpeed = forwardSpeed * 0.992
 		if throttle > 0.05 then
 			wantedSpeed = cfg.SpeedCap
@@ -164,12 +149,10 @@ local function startController()
 				wantedSpeed = -math.min(cfg.SpeedCap * 0.28, 90)
 			end
 		end
-
 		local alpha = math.clamp(dt * cfg.Accel, 0, 1)
 		local newForward = forwardSpeed + (wantedSpeed - forwardSpeed) * alpha
 		local newSide = sideSpeed / cfg.Grip
 		local newY = math.clamp(velocity.Y, -55, 22)
-
 		chassis.AssemblyLinearVelocity = (forward * newForward) + (right * newSide) + Vector3.new(0, newY, 0)
 		chassis.AssemblyAngularVelocity = chassis.AssemblyAngularVelocity * cfg.SpinDamp
 	end)
@@ -177,10 +160,7 @@ end
 
 local function stopController()
 	enabled = false
-	if heartbeat then
-		heartbeat:Disconnect()
-		heartbeat = nil
-	end
+	if heartbeat then heartbeat:Disconnect() heartbeat = nil end
 end
 
 local function hardStop()
@@ -193,9 +173,7 @@ end
 local function eject()
 	stopController()
 	resetLiveTune()
-	if Rayfield then
-		Rayfield:Destroy()
-	end
+	if Rayfield then Rayfield:Destroy() end
 	script:Destroy()
 end
 
@@ -210,6 +188,16 @@ local function makeSlider(tab, name, range, increment, suffix, current, callback
 	})
 end
 
+-- Stub out filesystem functions so Rayfield never errors trying to save anything
+local _noop = function() end
+local _retTrue = function() return true end
+local _retEmpty = function() return "" end
+if not isfolder then isfolder = _retTrue end
+if not makefolder then makefolder = _noop end
+if not isfile then isfile = _retTrue end
+if not writefile then writefile = _noop end
+if not readfile then readfile = _retEmpty end
+
 local function createUI()
 	Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
@@ -223,17 +211,6 @@ local function createUI()
 		ToggleUIKeybind = "K",
 		DisableRayfieldPrompts = true,
 		DisableBuildWarnings = true,
-		ConfigurationSaving = {
-			Enabled = false,   -- FIX: removed FileName; Rayfield was trying to create
-			FolderName = nil,  --      a save directory even with saving disabled,
-			FileName = nil,    --      causing "Failed to create directory" errors.
-		},
-		Discord = {
-			Enabled = false,
-			Invite = "noinvitelink",
-			RememberJoins = false,
-		},
-		KeySystem = false,
 	})
 
 	local driveTab = Window:CreateTab("Drive", "gauge")
@@ -242,11 +219,7 @@ local function createUI()
 		Name = "Enabled",
 		CurrentValue = false,
 		Callback = function(value)
-			if value then
-				startController()
-			else
-				stopController()
-			end
+			if value then startController() else stopController() end
 		end,
 	})
 	driveTab:CreateToggle({
@@ -256,37 +229,17 @@ local function createUI()
 			autoApply = value
 		end,
 	})
-	makeSlider(driveTab, "Speed Cap", {20, 1000}, 5, " studs/s", cfg.SpeedCap, function(value)
-		cfg.SpeedCap = value
-	end)
-	makeSlider(driveTab, "Acceleration Response", {1, 30}, 1, "x", cfg.Accel, function(value)
-		cfg.Accel = value
-	end)
-	makeSlider(driveTab, "Brake Strength", {1, 60}, 1, "x", cfg.Brake, function(value)
-		cfg.Brake = value
-	end)
+	makeSlider(driveTab, "Speed Cap", {20, 1000}, 5, " studs/s", cfg.SpeedCap, function(v) cfg.SpeedCap = v end)
+	makeSlider(driveTab, "Acceleration Response", {1, 30}, 1, "x", cfg.Accel, function(v) cfg.Accel = v end)
+	makeSlider(driveTab, "Brake Strength", {1, 60}, 1, "x", cfg.Brake, function(v) cfg.Brake = v end)
 
 	local handlingTab = Window:CreateTab("Handling", "settings")
 	handlingTab:CreateSection("Grip And Stability")
-	makeSlider(handlingTab, "Steer Power", {0.5, 5}, 0.1, "x", cfg.SteerPower, function(value)
-		cfg.SteerPower = value
-		applyLiveTune()
-	end)
-	makeSlider(handlingTab, "Grip", {1, 5}, 0.1, "x", cfg.Grip, function(value)
-		cfg.Grip = value
-		applyLiveTune()
-	end)
-	makeSlider(handlingTab, "Downforce", {1, 8}, 0.1, "x", cfg.Downforce, function(value)
-		cfg.Downforce = value
-		applyLiveTune()
-	end)
-	makeSlider(handlingTab, "Spring Damping", {0.5, 4}, 0.1, "x", cfg.SpringDamp, function(value)
-		cfg.SpringDamp = value
-		applyLiveTune()
-	end)
-	makeSlider(handlingTab, "Spin Damping", {0.65, 0.99}, 0.01, "x", cfg.SpinDamp, function(value)
-		cfg.SpinDamp = value
-	end)
+	makeSlider(handlingTab, "Steer Power", {0.5, 5}, 0.1, "x", cfg.SteerPower, function(v) cfg.SteerPower = v applyLiveTune() end)
+	makeSlider(handlingTab, "Grip", {1, 5}, 0.1, "x", cfg.Grip, function(v) cfg.Grip = v applyLiveTune() end)
+	makeSlider(handlingTab, "Downforce", {1, 8}, 0.1, "x", cfg.Downforce, function(v) cfg.Downforce = v applyLiveTune() end)
+	makeSlider(handlingTab, "Spring Damping", {0.5, 4}, 0.1, "x", cfg.SpringDamp, function(v) cfg.SpringDamp = v applyLiveTune() end)
+	makeSlider(handlingTab, "Spin Damping", {0.65, 0.99}, 0.01, "x", cfg.SpinDamp, function(v) cfg.SpinDamp = v end)
 
 	local actionsTab = Window:CreateTab("Actions", "wrench")
 	actionsTab:CreateButton({ Name = "Refresh Current Vehicle", Callback = refreshVehicle })
@@ -298,11 +251,7 @@ local function createUI()
 		CurrentKeybind = "B",
 		HoldToInteract = false,
 		Callback = function()
-			if enabled then
-				stopController()
-			else
-				startController()
-			end
+			if enabled then stopController() else startController() end
 		end,
 	})
 	actionsTab:CreateKeybind({

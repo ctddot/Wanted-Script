@@ -224,9 +224,9 @@ local function createUI()
 		DisableRayfieldPrompts = true,
 		DisableBuildWarnings = true,
 		ConfigurationSaving = {
-			Enabled = false,
-			FolderName = nil,
-			FileName = "VehicleLiveTuner",
+			Enabled = false,   -- FIX: removed FileName; Rayfield was trying to create
+			FolderName = nil,  --      a save directory even with saving disabled,
+			FileName = nil,    --      causing "Failed to create directory" errors.
 		},
 		Discord = {
 			Enabled = false,

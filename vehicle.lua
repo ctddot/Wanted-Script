@@ -1,4 +1,5 @@
--- Vehicle Kavo Live Tuner
+-- Vehicle Kavo Live Tuner (Fixed)
+-- Fixes: steering torque decoupled from grip, AngularSpeed raised for responsiveness
 -- Use only in your own Roblox experience/test environment.
 -- Does not mutate read-only vehicle definition modules.
 
@@ -8,7 +9,7 @@ local UIS        = game:GetService("UserInputService")
 local Workspace  = game:GetService("Workspace")
 
 local player  = Players.LocalPlayer
-local Library -- Kavo handle
+local Library
 
 local enabled   = false
 local autoApply = true
@@ -50,7 +51,8 @@ local function getVehicleFromSeat(seat)
 end
 
 local function getChassis(vehicle)
-	local part = vehicle and vehicle:FindFirstChild("Chassis")
+	if not vehicle then return nil end
+	local part = vehicle:FindFirstChild("Chassis")
 	if part and part:IsA("BasePart") then return part end
 	local best
 	for _, item in ipairs(vehicle:GetDescendants()) do
@@ -89,11 +91,21 @@ local function applyLiveTune()
 	if not currentVehicle and not refreshVehicle() then return end
 	for _, item in ipairs(currentVehicle:GetDescendants()) do
 		if item:IsA("HingeConstraint") and item.Parent and tostring(item.Parent.Name):find("Steer") then
-			setProp(item, "ServoMaxTorque",       1000   * cfg.SteerPower * cfg.Grip)
+			-- FIX 1: ServoMaxTorque no longer multiplied by cfg.Grip
+			--        Steering torque and lateral grip are independent; coupling them caused
+			--        steering to weaken whenever grip was tuned down.
+			setProp(item, "ServoMaxTorque",       1000   * cfg.SteerPower)
+
 			setProp(item, "MotorMaxAcceleration", 500000 * cfg.SteerPower)
-			setProp(item, "AngularSpeed",         math.clamp(4 * cfg.SteerPower, 1, 30))
+
+			-- FIX 2: AngularSpeed ceiling raised from 30 → 120, base multiplier 4 → 8
+			--        At high speeds the servo needs to rotate faster to keep up with
+			--        the requested steer angle; the old cap made turning feel sluggish.
+			setProp(item, "AngularSpeed",         math.clamp(8 * cfg.SteerPower, 4, 120))
+
 		elseif item:IsA("SpringConstraint") then
 			setProp(item, "Damping", 1000 * cfg.SpringDamp)
+
 		elseif item:IsA("VectorForce") and item.Name == "Down" then
 			item.Force = Vector3.new(0, -404 * cfg.Downforce, 0)
 		end
@@ -119,7 +131,9 @@ local function startController()
 	end
 	enabled = true
 	applyLiveTune()
+
 	heartbeat = RunService.Heartbeat:Connect(function(dt)
+		-- Auto-stop if the seat or chassis leaves the workspace (ejected / model destroyed)
 		if not enabled
 			or not currentSeat or not currentSeat:IsDescendantOf(Workspace)
 			or not chassis     or not chassis:IsDescendantOf(Workspace)
@@ -128,6 +142,7 @@ local function startController()
 			if heartbeat then heartbeat:Disconnect(); heartbeat = nil end
 			return
 		end
+
 		if autoApply then applyLiveTune() end
 
 		local cf           = chassis.CFrame
@@ -140,6 +155,7 @@ local function startController()
 		local throttle     = currentSeat.ThrottleFloat
 
 		local wantedSpeed = forwardSpeed * 0.992
+
 		if throttle > 0.05 then
 			wantedSpeed = cfg.SpeedCap
 		elseif throttle < -0.05 then
@@ -178,15 +194,15 @@ local function eject()
 	script:Destroy()
 end
 
--- ─── UI (Kavo — zero filesystem usage) ───────────────────────────────────────
+-- ─── UI (Kavo) ────────────────────────────────────────────────────────────────
 
 Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 
 local Window = Library.CreateLib("Vehicle Live Tuner", "DarkTheme")
 
--- Drive tab
-local DriveTab     = Window:NewTab("Drive")
-local CtrlSection  = DriveTab:NewSection("Controller")
+-- ── Drive tab ─────────────────────────────────────────────────────────────────
+local DriveTab    = Window:NewTab("Drive")
+local CtrlSection = DriveTab:NewSection("Controller")
 
 CtrlSection:NewToggle("Enabled", "Start/stop the tuner controller", function(state)
 	if state then startController() else stopController() end
@@ -210,9 +226,9 @@ SpeedSection:NewSlider("Brake Strength", "Braking force multiplier (1-60)", 60, 
 	cfg.Brake = value
 end)
 
--- Handling tab
-local HandlingTab  = Window:NewTab("Handling")
-local GripSection  = HandlingTab:NewSection("Grip & Stability")
+-- ── Handling tab ──────────────────────────────────────────────────────────────
+local HandlingTab = Window:NewTab("Handling")
+local GripSection = HandlingTab:NewSection("Grip & Stability")
 
 GripSection:NewSlider("Steer Power x10", "Steering torque (5-50 = 0.5x-5.0x)", 50, 5, function(value)
 	cfg.SteerPower = value / 10
@@ -238,9 +254,9 @@ GripSection:NewSlider("Spin Damp x100", "Angular velocity decay (65-99 = 0.65x-0
 	cfg.SpinDamp = value / 100
 end)
 
--- Actions tab
-local ActionsTab    = Window:NewTab("Actions")
-local ActSection    = ActionsTab:NewSection("Vehicle Controls")
+-- ── Actions tab ───────────────────────────────────────────────────────────────
+local ActionsTab = Window:NewTab("Actions")
+local ActSection = ActionsTab:NewSection("Vehicle Controls")
 
 ActSection:NewButton("Refresh Vehicle", "Re-detect seat and chassis", function()
 	refreshVehicle()
@@ -262,7 +278,8 @@ ActSection:NewButton("Eject (F12)", "Destroy UI and clean up", function()
 	eject()
 end)
 
--- Keyboard shortcuts
+-- ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+
 UIS.InputBegan:Connect(function(input, gpe)
 	if gpe then return end
 	if input.KeyCode == Enum.KeyCode.B then
@@ -272,4 +289,4 @@ UIS.InputBegan:Connect(function(input, gpe)
 	end
 end)
 
-print("[VehicleTuner] Kavo loaded. B = toggle controller, F12 = eject.")
+print("[VehicleTuner] Loaded. B = toggle controller, F12 = eject.")
